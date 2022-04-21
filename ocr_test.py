@@ -16,7 +16,60 @@ import pandas as pd
 import cv2
 import pytesseract
 import regex as re
+from elasticsearch import Elasticsearch
+import requests
+import json
 
+
+#es = Elasticsearch('localhost:9200')
+
+#es = Elasticsearch(
+#        ['HOST'],
+#        http_auth = ('USER', 'PASSWORD')
+#        )
+
+
+#인덱스 생성
+def create_bm25_idx(elastic_url, idx_name):
+    req_url = '%s/%s' % (elastic_url, idx_name)
+    data = {
+        'settings': {
+            'number_of_shards': 1,
+            'index': {
+                'similarity': {
+                    'default': {
+                        'type': 'BM25'
+                    }
+                }
+            }
+        }
+    }
+    headers = {'Content-Type': 'application/json'}
+    req = requests.put(req_url, data=json.dumps(data), headers=headers)
+    print(req.text)
+
+#document 추가 함수
+def add_doc(elastic_url, idx_name, doc):
+    req_url = '%s/%s/_doc' % (elastic_url, idx_name)
+    headers = {'Content-Type': 'application/json'}
+    req = requests.post(req_url,
+                       data=json.dumps(doc),
+                       headers=headers)
+    print(req.text)
+
+#search
+def search(elastic_url, idx_name, query, attr_name):
+    req_url = '%s/%s' % (elastic_url, idx_name)
+    data = {
+        'query': {
+            'match': {
+                attr_name: query
+            }
+        }
+    }
+    headers = {'Content-Type': 'application/json'}
+    req = requests.get(req_url, data=json.dumps(data), headers=headers)
+    print(req.text)
 
 def convert_image(image_path):
     img = cv2.imread(image_path)
@@ -49,10 +102,28 @@ def extract_words(details):
 
         if (last_word != '' and word == '') or (word == details['text'][-1]):
             parsed = ''.join(word_list)
-            match = re.match(r"([가-힣ㄱ-ㅎㅏ-ㅣ]+)([0-9]+)", parsed, re.I)
+            match = re.match(r"([가-힣ㄱ-ㅎㅏ-ㅣ]+)", parsed, re.I)
+            match2 = re.match(r"([0-9]+)", parsed, re.I)
 
-            if match:
-                items = match.groups()
+            if match is None:
+                return None
+            Query = '''POST /checking/_search
+                        {
+                          "suggest" : {
+                              "my-suggestion" : {
+                                "text" : "''' + match.group() +'''",
+                                "term" : {
+                                "field" : "name",
+                                "string_distance" : "jaro_winkler"
+                              }
+                            }
+                          }
+                        }'''
+
+            searched = search('http://localhost:9200', 'checking/_search', Query, 'name')
+
+            if searched:
+                items = searched
             else:
                 items = parsed
 
@@ -92,6 +163,7 @@ def main():
     parse_text = extract_words(details)
 
     print(f"Parsed text: {parse_text}")
+
 
     save = pd.DataFrame(parse_text)
     save.to_csv("/Users/heeyeon/Desktop/graduate_/graduate/saved_text.csv", header=False, index=False)
