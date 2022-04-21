@@ -107,11 +107,12 @@ def extract_words(details):
 
             if match is None:
                 return None
-            Query = '''POST /checking/_search
+            print(match.group(1))
+            Query = '''POST /capstone2
                         {
                           "suggest" : {
                               "my-suggestion" : {
-                                "text" : "''' + match.group() +'''",
+                                "text" : "''' + match.group(1) +'''",
                                 "term" : {
                                 "field" : "name",
                                 "string_distance" : "jaro_winkler"
@@ -120,7 +121,7 @@ def extract_words(details):
                           }
                         }'''
 
-            searched = search('http://localhost:9200', 'checking/_search', Query, 'name')
+            searched = search('http://localhost:9200', 'capstone2', Query, 'name')
 
             if searched:
                 items = searched
