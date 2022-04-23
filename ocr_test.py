@@ -11,7 +11,7 @@ Command:
   $ python image_process_v1.py
 
 """
-
+import elasticsearch
 import pandas as pd
 import cv2
 import pytesseract
@@ -19,6 +19,8 @@ import regex as re
 from elasticsearch import Elasticsearch
 import requests
 import json
+from symspellpy import SymSpell, Verbosity
+from hangul_utils import split_syllable_char, split_syllables, join_jamos
 
 
 #es = Elasticsearch('localhost:9200')
@@ -28,48 +30,6 @@ import json
 #        http_auth = ('USER', 'PASSWORD')
 #        )
 
-
-#인덱스 생성
-def create_bm25_idx(elastic_url, idx_name):
-    req_url = '%s/%s' % (elastic_url, idx_name)
-    data = {
-        'settings': {
-            'number_of_shards': 1,
-            'index': {
-                'similarity': {
-                    'default': {
-                        'type': 'BM25'
-                    }
-                }
-            }
-        }
-    }
-    headers = {'Content-Type': 'application/json'}
-    req = requests.put(req_url, data=json.dumps(data), headers=headers)
-    print(req.text)
-
-#document 추가 함수
-def add_doc(elastic_url, idx_name, doc):
-    req_url = '%s/%s/_doc' % (elastic_url, idx_name)
-    headers = {'Content-Type': 'application/json'}
-    req = requests.post(req_url,
-                       data=json.dumps(doc),
-                       headers=headers)
-    print(req.text)
-
-#search
-def search(elastic_url, idx_name, query, attr_name):
-    req_url = '%s/%s' % (elastic_url, idx_name)
-    data = {
-        'query': {
-            'match': {
-                attr_name: query
-            }
-        }
-    }
-    headers = {'Content-Type': 'application/json'}
-    req = requests.get(req_url, data=json.dumps(data), headers=headers)
-    print(req.text)
 
 def convert_image(image_path):
     img = cv2.imread(image_path)
@@ -99,37 +59,36 @@ def extract_words(details):
         if word != '':
             word_list.append(word)
             last_word = word
-
+        #print(word)
         if (last_word != '' and word == '') or (word == details['text'][-1]):
             parsed = ''.join(word_list)
+
             match = re.match(r"([가-힣ㄱ-ㅎㅏ-ㅣ]+)", parsed, re.I)
-            match2 = re.match(r"([0-9]+)", parsed, re.I)
+            match2 = re.findall(r'([0-9]+)', parsed, re.I)
+            print(match2)
+            if match:
+                dictionary_path = '/Users/heeyeon/Desktop/graduate_/graduate/forSpellCheck.txt'
+                vocab = pd.read_csv(dictionary_path, sep=" ", names=["term", "count"])
+                vocab.term = vocab.term.map(split_syllables)
+                vocab.to_csv("/Users/heeyeon/Desktop/graduate_/graduate/forSpellCheck1.txt", sep=" ", header=None, index=None)
+                vocab.head()
 
-            if match is None:
-                return None
-            print(match.group(1))
-            Query = '''POST /capstone2
-                        {
-                          "suggest" : {
-                              "my-suggestion" : {
-                                "text" : "''' + match.group(1) +'''",
-                                "term" : {
-                                "field" : "name",
-                                "string_distance" : "jaro_winkler"
-                              }
-                            }
-                          }
-                        }'''
+                sym_spell = SymSpell(max_dictionary_edit_distance=3)
+                dictionary_path1 = "/Users/heeyeon/Desktop/graduate_/graduate/forSpellCheck1.txt"
+                sym_spell.load_dictionary(dictionary_path1, 0, 1)
 
-            searched = search('http://localhost:9200', 'capstone2', Query, 'name')
+                term = match.group(1)
+                term = split_syllables(term)
+                print(term)
 
-            if searched:
-                items = searched
-            else:
-                items = parsed
+                suggestions = sym_spell.lookup(term, Verbosity.ALL, max_edit_distance=2)
+                for sugg in suggestions:
+                    items = join_jamos(sugg.term)
+                    break
+                parse_text.append(items+" "+match2[0])
 
-            parse_text.append(items)
-            word_list = []
+                word_list = []
+
     return parse_text
 
 
@@ -155,10 +114,10 @@ def display_image(threshold_img):
 
 def main():
 
-    image_path = '/Users/heeyeon/Desktop/graduate_/graduate/allergy_test2.jpg'
+    image_path = '/Users/heeyeon/Desktop/graduate_/graduate/imgs/sampleImg2.png'
     threshold_img = convert_image(image_path)
 
-    # display_image(threshold_img)
+    #display_image(threshold_img)
 
     details = feed_image_to_tess(threshold_img)
     parse_text = extract_words(details)
